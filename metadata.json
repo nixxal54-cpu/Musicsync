@@ -1,0 +1,6 @@
+{
+  "name": "LyricSync",
+  "description": "An immersive audio player that automatically generates synchronized lyrics and visual themes based on the song's emotional tone.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
