@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { LyricLine, ThemeConfig } from '@/lib/gemini';
 import { cn } from '@/lib/utils';
 import { UserSettings } from '@/lib/useSettings';
@@ -15,46 +15,61 @@ export function LyricsDisplay({ lyrics, currentTime, theme, settings }: LyricsDi
   const innerRef = useRef<HTMLDivElement>(null);
   const lineRefs = useRef<(HTMLDivElement | null)[]>([]);
   const rafRef = useRef<number | null>(null);
-  const lastActiveRef = useRef<number>(-2);
   const currentYRef = useRef<number>(0);
+  const lastActiveRef = useRef<number>(-2);
 
-  // Find active line — pure computation, no setState
-  let activeIndex = -1;
-  for (let i = lyrics.length - 1; i >= 0; i--) {
-    if (currentTime - settings.lyricOffset >= lyrics[i].time) {
-      activeIndex = i;
-      break;
-    }
-  }
-
-  // Update lyric line styles directly on DOM — zero re-renders
+  // Runs every render (currentTime changes every 250ms from PlayerView)
+  // All visual updates are direct DOM mutations — no setState, no extra re-render
   useEffect(() => {
+    // Compute active index
+    let activeIndex = -1;
+    for (let i = lyrics.length - 1; i >= 0; i--) {
+      if (currentTime - settings.lyricOffset >= lyrics[i].time) {
+        activeIndex = i;
+        break;
+      }
+    }
+
+    // --- Update each line's style directly ---
     lineRefs.current.forEach((el, i) => {
       if (!el) return;
       const isActive = i === activeIndex;
       const isPassed = i < activeIndex;
       const distance = Math.abs(activeIndex - i);
 
-      const opacity = isActive ? 1 : distance < 5 ? Math.max(0, 1 - distance * 0.2) : 0;
-      const scale = isActive ? 1 : 0.95;
+      // Opacity
+      let opacity = 0;
+      if (isActive) opacity = 1;
+      else if (distance < 5) opacity = Math.max(0, 1 - distance * 0.22);
 
-      let color = '#555';
-      if (isPassed) color = '#3a3a3a';
+      // Scale
+      const scale = isActive ? 1 : 0.94;
+
+      // Color
+      let color = '#4a4a4a';
+      if (isPassed) color = '#333';
       if (isActive) {
         switch (theme.highlightEffect) {
           case 'color': color = theme.primaryColor; break;
           case 'outline': color = 'transparent'; break;
-          default: color = '#fff';
+          default: color = '#ffffff';
         }
       }
 
+      // Glow / stroke / bold
       let textShadow = 'none';
-      let webkitTextStroke = 'unset';
-      let fontWeight = '';
+      let webkitTextStroke = '0px transparent';
       if (isActive) {
-        if (theme.highlightEffect === 'glow') textShadow = `0 0 20px ${theme.primaryColor}90`;
-        if (theme.highlightEffect === 'bold') fontWeight = '800';
-        if (theme.highlightEffect === 'outline') webkitTextStroke = `1px ${theme.primaryColor}`;
+        if (theme.highlightEffect === 'glow')
+          textShadow = `0 0 24px ${theme.primaryColor}99, 0 0 48px ${theme.primaryColor}44`;
+        if (theme.highlightEffect === 'outline')
+          webkitTextStroke = `1.5px ${theme.primaryColor}`;
+        if (theme.highlightEffect === 'bold')
+          el.style.fontWeight = '800';
+        else
+          el.style.fontWeight = '';
+      } else {
+        el.style.fontWeight = '';
       }
 
       el.style.opacity = String(opacity);
@@ -62,55 +77,41 @@ export function LyricsDisplay({ lyrics, currentTime, theme, settings }: LyricsDi
       el.style.color = color;
       el.style.textShadow = textShadow;
       (el.style as any).webkitTextStroke = webkitTextStroke;
-      if (fontWeight) el.style.fontWeight = fontWeight;
-      else el.style.fontWeight = '';
     });
-  }, [activeIndex, theme]);
 
-  // Smooth scroll via RAF lerp — no state, pure DOM
-  useEffect(() => {
+    // --- Scroll: only when active line changes ---
     if (lastActiveRef.current === activeIndex) return;
     lastActiveRef.current = activeIndex;
 
     const container = containerRef.current;
     const inner = innerRef.current;
-
     if (!container || !inner) return;
 
-    let targetY: number;
     const activeLine = lineRefs.current[activeIndex];
-
-    if (activeIndex === -1 || !activeLine) {
-      targetY = container.clientHeight / 3;
-    } else {
-      targetY = container.clientHeight / 2 - activeLine.offsetTop - activeLine.clientHeight / 2;
-    }
+    const targetY =
+      activeIndex === -1 || !activeLine
+        ? container.clientHeight / 3
+        : container.clientHeight / 2 - activeLine.offsetTop - activeLine.clientHeight / 2;
 
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
 
     const animate = () => {
       const diff = targetY - currentYRef.current;
-      if (Math.abs(diff) < 0.4) {
+      if (Math.abs(diff) < 0.5) {
         currentYRef.current = targetY;
         inner.style.transform = `translateY(${targetY}px)`;
         return;
       }
-      currentYRef.current += diff * 0.12;
+      currentYRef.current += diff * 0.1;
       inner.style.transform = `translateY(${currentYRef.current}px)`;
       rafRef.current = requestAnimationFrame(animate);
     };
-
     rafRef.current = requestAnimationFrame(animate);
 
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-  }, [activeIndex, settings.lyricOffset]);
-
-  // Re-scroll when size/alignment settings change
-  useEffect(() => {
-    lastActiveRef.current = -2;
-  }, [settings.lyricSize, settings.lyricAlignment]);
+  }); // <-- no dependency array: runs every render, which is every 250ms tick
 
   const fontClass =
     theme.fontStyle === 'elegant'
@@ -118,14 +119,6 @@ export function LyricsDisplay({ lyrics, currentTime, theme, settings }: LyricsDi
       : theme.fontStyle === 'brutalist_mono'
         ? 'font-mono uppercase tracking-tight'
         : 'font-sans tracking-tight';
-
-  const getSizeClasses = (isActive: boolean) => {
-    if (settings.lyricSize === 'small')
-      return isActive ? 'text-2xl md:text-5xl' : 'text-lg md:text-3xl';
-    if (settings.lyricSize === 'large')
-      return isActive ? 'text-4xl md:text-8xl' : 'text-2xl md:text-6xl';
-    return isActive ? 'text-3xl md:text-6xl lg:text-7xl' : 'text-xl md:text-4xl lg:text-5xl';
-  };
 
   const getAlignClass = () => {
     switch (settings.lyricAlignment) {
@@ -141,6 +134,15 @@ export function LyricsDisplay({ lyrics, currentTime, theme, settings }: LyricsDi
     return 'center center';
   };
 
+  // Size: use the larger (active) size for all lines — active line is visually
+  // distinguished by opacity=1 + scale=1 vs others at 0.94. This avoids needing
+  // re-render to swap class names per-line.
+  const getSizeClass = () => {
+    if (settings.lyricSize === 'small') return 'text-2xl md:text-4xl';
+    if (settings.lyricSize === 'large') return 'text-3xl md:text-7xl';
+    return 'text-2xl md:text-5xl lg:text-6xl';
+  };
+
   return (
     <div
       ref={containerRef}
@@ -153,36 +155,32 @@ export function LyricsDisplay({ lyrics, currentTime, theme, settings }: LyricsDi
       <div
         ref={innerRef}
         className={cn(
-          'w-full max-w-5xl mx-auto relative flex flex-col will-change-transform',
+          'w-full max-w-5xl mx-auto flex flex-col will-change-transform',
           getAlignClass()
         )}
         style={{ transform: 'translateY(0px)' }}
       >
-        {lyrics.map((line, i) => {
-          const isActive = i === activeIndex;
-          return (
-            <div
-              key={i}
-              ref={(el) => { lineRefs.current[i] = el; }}
-              className={cn(
-                'w-full py-2 md:py-4 leading-tight',
-                fontClass,
-                getSizeClasses(isActive)
-              )}
-              style={{
-                opacity: 0,
-                transform: 'scale(0.95)',
-                transformOrigin: getOrigin(),
-                color: '#555',
-                willChange: 'opacity, transform',
-                // CSS transitions handle smoothness — no JS per-tick
-                transition: 'opacity 0.3s ease, transform 0.3s ease, color 0.3s ease, text-shadow 0.3s ease',
-              }}
-            >
-              {line.text}
-            </div>
-          );
-        })}
+        {lyrics.map((line, i) => (
+          <div
+            key={i}
+            ref={(el) => { lineRefs.current[i] = el; }}
+            className={cn(
+              'w-full py-2 md:py-3 leading-tight',
+              fontClass,
+              getSizeClass()
+            )}
+            style={{
+              opacity: 0,
+              transform: 'scale(0.94)',
+              transformOrigin: getOrigin(),
+              color: '#4a4a4a',
+              willChange: 'opacity, transform, color',
+              transition: 'opacity 0.35s ease, transform 0.35s ease, color 0.35s ease, text-shadow 0.35s ease',
+            }}
+          >
+            {line.text}
+          </div>
+        ))}
       </div>
     </div>
   );
