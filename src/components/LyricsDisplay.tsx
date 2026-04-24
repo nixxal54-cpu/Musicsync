@@ -11,13 +11,10 @@ interface LyricsDisplayProps {
   settings: UserSettings;
 }
 
-// ── Visualizer: 20 bars animated via RAF, reads AnalyserNode if available ──
-function Visualizer({ audioRef, color }: { audioRef: React.RefObject<HTMLAudioElement>; color: string }) {
+// Fake-only visualizer — no Web Audio API touching the element
+function Visualizer({ color }: { color: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const dataRef = useRef<Uint8Array | null>(null);
-  const ctxRef = useRef<AudioContext | null>(null);
 
   useEffect(() => {
     const BAR_COUNT = 28;
@@ -25,64 +22,33 @@ function Visualizer({ audioRef, color }: { audioRef: React.RefObject<HTMLAudioEl
     if (!canvas) return;
     const ctx = canvas.getContext('2d')!;
 
-    // Try to hook up Web Audio analyser for real frequency data
-    const audio = audioRef.current;
-    if (audio && !analyserRef.current) {
-      try {
-        const ac = new AudioContext();
-        ctxRef.current = ac;
-        const source = ac.createMediaElementSource(audio);
-        const analyser = ac.createAnalyser();
-        analyser.fftSize = 64;
-        source.connect(analyser);
-        analyser.connect(ac.destination);
-        analyserRef.current = analyser;
-        dataRef.current = new Uint8Array(analyser.frequencyBinCount);
-      } catch (_) {
-        // fallback to fake animation if already connected
-      }
-    }
-
-    // Fake heights for fallback animation
-    const fakePhases = Array.from({ length: BAR_COUNT }, (_, i) => Math.random() * Math.PI * 2);
-    const fakeSpeeds = Array.from({ length: BAR_COUNT }, () => 0.03 + Math.random() * 0.04);
-
-    let frame = 0;
+    const phases = Array.from({ length: BAR_COUNT }, () => Math.random() * Math.PI * 2);
+    const speeds = Array.from({ length: BAR_COUNT }, (_, i) => 0.025 + (i % 4) * 0.012);
+    // Each bar has a different amplitude so it looks organic
+    const amps = Array.from({ length: BAR_COUNT }, () => 0.4 + Math.random() * 0.5);
 
     const draw = () => {
-      frame++;
       const W = canvas.width;
       const H = canvas.height;
       ctx.clearRect(0, 0, W, H);
 
       const barW = W / BAR_COUNT;
-      const gap = 3;
+      const gap = 4;
 
       for (let i = 0; i < BAR_COUNT; i++) {
-        let heightRatio: number;
-
-        if (analyserRef.current && dataRef.current) {
-          analyserRef.current.getByteFrequencyData(dataRef.current);
-          const idx = Math.floor((i / BAR_COUNT) * dataRef.current.length);
-          heightRatio = dataRef.current[idx] / 255;
-        } else {
-          // Smooth fake wave
-          fakePhases[i] += fakeSpeeds[i];
-          heightRatio = 0.15 + 0.7 * Math.abs(Math.sin(fakePhases[i]));
-        }
-
-        const barH = Math.max(4, heightRatio * H * 0.85);
+        phases[i] += speeds[i];
+        const heightRatio = 0.1 + amps[i] * Math.abs(Math.sin(phases[i]));
+        const barH = Math.max(5, heightRatio * H);
         const x = i * barW + gap / 2;
         const y = (H - barH) / 2;
 
-        // Gradient per bar
         const grad = ctx.createLinearGradient(x, y, x, y + barH);
-        grad.addColorStop(0, color + 'ff');
-        grad.addColorStop(1, color + '33');
+        grad.addColorStop(0, color + 'ee');
+        grad.addColorStop(1, color + '22');
 
         ctx.fillStyle = grad;
         ctx.beginPath();
-        ctx.roundRect(x, y, barW - gap, barH, 3);
+        ctx.roundRect(x, y, barW - gap, barH, 4);
         ctx.fill();
       }
 
@@ -97,9 +63,8 @@ function Visualizer({ audioRef, color }: { audioRef: React.RefObject<HTMLAudioEl
     <canvas
       ref={canvasRef}
       width={320}
-      height={80}
-      className="w-64 md:w-80 h-16 md:h-20"
-      style={{ imageRendering: 'pixelated' }}
+      height={100}
+      style={{ width: '280px', height: '88px' }}
     />
   );
 }
@@ -129,7 +94,6 @@ export function LyricsDisplay({ lyrics, audioRef, lyricOffset, theme, settings }
       const offset = lyricOffsetRef.current;
       const t = themeRef.current;
 
-      // Active index
       let activeIndex = -1;
       for (let i = lyrics.length - 1; i >= 0; i--) {
         if (ct - offset >= lyrics[i].time) {
@@ -138,18 +102,16 @@ export function LyricsDisplay({ lyrics, audioRef, lyricOffset, theme, settings }
         }
       }
 
-      // Show/hide visualizer — visible when no active lyric
+      // Visualizer visibility
       const showViz = activeIndex === -1;
       const viz = vizRef.current;
-      if (viz) {
-        if (showViz !== vizVisibleRef.current) {
-          vizVisibleRef.current = showViz;
-          viz.style.opacity = showViz ? '1' : '0';
-          viz.style.transform = showViz ? 'translateY(0px) scale(1)' : 'translateY(10px) scale(0.95)';
-        }
+      if (viz && showViz !== vizVisibleRef.current) {
+        vizVisibleRef.current = showViz;
+        viz.style.opacity = showViz ? '1' : '0';
+        viz.style.pointerEvents = showViz ? 'none' : 'none';
       }
 
-      // Update each line style
+      // Line styles
       lineRefs.current.forEach((el, i) => {
         if (!el) return;
         const isActive = i === activeIndex;
@@ -251,23 +213,24 @@ export function LyricsDisplay({ lyrics, audioRef, lyricOffset, theme, settings }
         WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%)',
       }}
     >
-      {/* Visualizer — shown when no lyric is active */}
+      {/* Visualizer — centered, fades out when lyrics kick in */}
       <div
         ref={vizRef}
         className="absolute inset-0 flex items-center justify-center pointer-events-none"
         style={{
           opacity: 1,
-          transform: 'translateY(0px) scale(1)',
-          transition: 'opacity 0.5s ease, transform 0.5s ease',
+          transition: 'opacity 0.6s ease',
+          zIndex: 0,
         }}
       >
-        <Visualizer audioRef={audioRef} color={theme.primaryColor} />
+        <Visualizer color={theme.primaryColor} />
       </div>
 
-      {/* Lyrics inner — RAF owns transform */}
+      {/* Lyrics — RAF owns translateY */}
       <div
         ref={innerRef}
-        className={cn('w-full max-w-5xl mx-auto flex flex-col will-change-transform', getAlignClass())}
+        className={cn('relative w-full max-w-5xl mx-auto flex flex-col will-change-transform', getAlignClass())}
+        style={{ zIndex: 1 }}
       >
         {lyrics.map((line, i) => (
           <div
