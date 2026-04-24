@@ -63,16 +63,21 @@ export function PlayerView({ metadata, audioUrl, theme, lyrics, onBack }: Player
     }
   }, [lyrics]);
 
+  const [translateError, setTranslateError] = useState<string | null>(null);
+
   const doTranslate = async (target?: TranslateTarget) => {
     const t = target ?? translateTarget;
     setIsTranslating(true);
+    setTranslateError(null);
     setShowTranslateToast(false);
     try {
       const translated = await translateLyrics(lyrics, t);
+      if (!translated || translated.length === 0) throw new Error('Empty response');
       setActiveLyrics(translated);
       setIsTranslated(true);
-    } catch (e) {
+    } catch (e: any) {
       console.error('Translation failed', e);
+      setTranslateError(e?.message || 'Translation failed. Check your API key.');
     } finally {
       setIsTranslating(false);
     }
@@ -322,6 +327,11 @@ export function PlayerView({ metadata, audioUrl, theme, lyrics, onBack }: Player
                 {isTranslated && (
                   <p className="text-[10px] text-[#FF3366]/80 font-mono">
                     ✓ Showing translated lyrics
+                  </p>
+                )}
+                {translateError && (
+                  <p className="text-[10px] text-red-400 font-mono break-words">
+                    ✗ {translateError}
                   </p>
                 )}
               </div>
