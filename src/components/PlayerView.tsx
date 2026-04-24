@@ -20,6 +20,7 @@ interface PlayerViewProps {
 export function PlayerView({ metadata, audioUrl, theme, lyrics, onBack }: PlayerViewProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const filterRef = useRef<KaraokeAudioFilter | null>(null);
+  const lastTimeUpdateRef = useRef<number>(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -64,7 +65,7 @@ export function PlayerView({ metadata, audioUrl, theme, lyrics, onBack }: Player
       <audio 
         ref={audioRef}
         src={audioUrl}
-        onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
+        onTimeUpdate={(e) => { const now = performance.now(); if (now - lastTimeUpdateRef.current < 250) return; lastTimeUpdateRef.current = now; setCurrentTime(e.currentTarget.currentTime); }}
         onDurationChange={(e) => setDuration(e.currentTarget.duration)}
         onPlay={() => setIsPlaying(true)}
         onPause={() => setIsPlaying(false)}
