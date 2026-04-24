@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Settings, Play, Pause, SkipBack, SkipForward, Mic2, MicOff, X } from 'lucide-react';
+import { Settings, Play, Pause, SkipBack, SkipForward, Mic2, MicOff, X, Languages, ChevronDown, Check, Loader2 } from 'lucide-react';
 import { ThemeConfig, LyricLine } from '@/lib/gemini';
 import { LyricsDisplay } from './LyricsDisplay';
 import { ThemeBackground } from './ThemeBackground';
@@ -8,6 +8,7 @@ import { KaraokeAudioFilter } from '@/lib/karaoke';
 import { cn } from '@/lib/utils';
 import { FileMetadata } from '@/lib/metadata';
 import { useSettings } from '@/lib/useSettings';
+import { detectNonLatinScript, translateLyrics, TRANSLATE_OPTIONS, TranslateTarget } from '@/lib/translate';
 
 interface PlayerViewProps {
   metadata: FileMetadata;
@@ -29,6 +30,55 @@ export function PlayerView({ metadata, audioUrl, theme, lyrics, onBack }: Player
   const { settings, updateSetting } = useSettings();
   const [customTheme, setCustomTheme] = useState<ThemeConfig>(theme);
 
+  // Translation state
+  const [activeLyrics, setActiveLyrics] = useState<LyricLine[]>(lyrics);
+  const [detectedLang, setDetectedLang] = useState<string | null>(null);
+  const [showTranslateToast, setShowTranslateToast] = useState(false);
+  const [translateTarget, setTranslateTarget] = useState<TranslateTarget>('hinglish');
+  const [isTranslating, setIsTranslating] = useState(false);
+  const [isTranslated, setIsTranslated] = useState(false);
+  const [showLangPicker, setShowLangPicker] = useState(false);
+
+  // Detect language on lyrics load
+  useEffect(() => {
+    setActiveLyrics(lyrics);
+    setIsTranslated(false);
+    const lang = detectNonLatinScript(lyrics);
+    setDetectedLang(lang);
+    if (lang) {
+      // Auto-set sensible default target
+      if (lang === 'Hindi') setTranslateTarget('hinglish');
+      else if (lang === 'Tamil') setTranslateTarget('tamil_roman');
+      else if (lang === 'Arabic') setTranslateTarget('arabic_roman');
+      else if (lang === 'Japanese') setTranslateTarget('japanese_roman');
+      else if (lang === 'Korean') setTranslateTarget('korean_roman');
+      else setTranslateTarget('english');
+
+      // Show toast after short delay
+      setTimeout(() => setShowTranslateToast(true), 1200);
+    }
+  }, [lyrics]);
+
+  const doTranslate = async (target?: TranslateTarget) => {
+    const t = target ?? translateTarget;
+    setIsTranslating(true);
+    setShowTranslateToast(false);
+    try {
+      const translated = await translateLyrics(lyrics, t);
+      setActiveLyrics(translated);
+      setIsTranslated(true);
+    } catch (e) {
+      console.error('Translation failed', e);
+    } finally {
+      setIsTranslating(false);
+    }
+  };
+
+  const revertToOriginal = () => {
+    setActiveLyrics(lyrics);
+    setIsTranslated(false);
+  };
+
   useEffect(() => {
     if (audioRef.current && !filterRef.current) {
       filterRef.current = new KaraokeAudioFilter(audioRef.current);
@@ -38,22 +88,14 @@ export function PlayerView({ metadata, audioUrl, theme, lyrics, onBack }: Player
   const handlePlayPause = () => {
     if (!audioRef.current) return;
     if (filterRef.current) filterRef.current.init();
-    if (isPlaying) {
-      audioRef.current.pause();
-    } else {
-      audioRef.current.play().catch(e => console.error("Playback failed:", e));
-    }
+    if (isPlaying) audioRef.current.pause();
+    else audioRef.current.play().catch(e => console.error('Playback failed:', e));
   };
 
   const toggleKaraoke = () => {
     const newMode = !karaokeMode;
     setKaraokeMode(newMode);
     if (filterRef.current) filterRef.current.setMode(newMode);
-  };
-
-  // currentTime only drives the seekbar UI — LyricsDisplay reads audio directly via ref
-  const handleTimeUpdate = (e: React.SyntheticEvent<HTMLAudioElement>) => {
-    setCurrentTime(e.currentTarget.currentTime);
   };
 
   return (
@@ -66,20 +108,113 @@ export function PlayerView({ metadata, audioUrl, theme, lyrics, onBack }: Player
       <audio
         ref={audioRef}
         src={audioUrl}
-        onTimeUpdate={handleTimeUpdate}
+        onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
         onDurationChange={(e) => setDuration(e.currentTarget.duration)}
         onPlay={() => setIsPlaying(true)}
         onPause={() => setIsPlaying(false)}
       />
 
-      {/* Pass audioRef so LyricsDisplay reads time directly — no React state lag */}
       <LyricsDisplay
-        lyrics={lyrics}
+        lyrics={activeLyrics}
         audioRef={audioRef}
         lyricOffset={lyricOffset}
         theme={customTheme}
         settings={settings}
       />
+
+      {/* ── Translate Toast ── */}
+      <AnimatePresence>
+        {showTranslateToast && (
+          <motion.div
+            initial={{ opacity: 0, y: 20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.95 }}
+            transition={{ type: 'spring', damping: 20, stiffness: 200 }}
+            className="absolute bottom-44 md:bottom-52 left-1/2 -translate-x-1/2 z-50 w-[90vw] max-w-sm"
+          >
+            <div className="bg-[#111]/95 backdrop-blur-2xl border border-white/10 rounded-2xl p-4 shadow-2xl flex flex-col gap-3">
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 rounded-xl bg-[#FF3366]/15 flex items-center justify-center shrink-0">
+                  <Languages className="w-4 h-4 text-[#FF3366]" />
+                </div>
+                <div className="flex flex-col gap-0.5">
+                  <p className="text-white text-sm font-semibold leading-snug">
+                    {detectedLang} lyrics detected
+                  </p>
+                  <p className="text-white/50 text-xs leading-snug">
+                    Translate to a language you understand?
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowTranslateToast(false)}
+                  className="ml-auto text-white/30 hover:text-white/70 transition"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Language picker inside toast */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowLangPicker(p => !p)}
+                  className="w-full flex items-center justify-between px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-sm text-white/80 hover:bg-white/10 transition"
+                >
+                  <span>{TRANSLATE_OPTIONS.find(o => o.value === translateTarget)?.label}</span>
+                  <ChevronDown className={cn('w-4 h-4 text-white/40 transition-transform', showLangPicker && 'rotate-180')} />
+                </button>
+                <AnimatePresence>
+                  {showLangPicker && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -6 }}
+                      className="absolute bottom-full mb-2 left-0 right-0 bg-[#1a1a1a] border border-white/10 rounded-xl overflow-hidden shadow-2xl z-10"
+                    >
+                      {TRANSLATE_OPTIONS.map(opt => (
+                        <button
+                          key={opt.value}
+                          onClick={() => { setTranslateTarget(opt.value); setShowLangPicker(false); }}
+                          className={cn(
+                            'w-full flex items-center justify-between px-3 py-2.5 text-sm hover:bg-white/5 transition text-left',
+                            translateTarget === opt.value ? 'text-[#FF3366]' : 'text-white/70'
+                          )}
+                        >
+                          <span>{opt.label}</span>
+                          <span className="text-[10px] text-white/30">{opt.description}</span>
+                        </button>
+                      ))}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              <button
+                onClick={() => doTranslate()}
+                className="w-full py-2.5 bg-[#FF3366] hover:bg-[#e0204f] rounded-xl text-sm font-bold text-white tracking-wide transition-colors"
+              >
+                Yes, Translate
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Translating spinner */}
+      <AnimatePresence>
+        {isTranslating && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+          >
+            <div className="flex flex-col items-center gap-3">
+              <Loader2 className="w-8 h-8 text-[#FF3366] animate-spin" />
+              <p className="text-white/70 text-sm font-medium">Translating lyrics...</p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Header */}
       <h1 className="absolute top-4 left-4 md:top-8 md:left-8 text-white/50 text-base md:text-xl font-light tracking-widest flex items-center gap-3 md:gap-4 z-40 max-w-[70vw]">
@@ -99,6 +234,7 @@ export function PlayerView({ metadata, audioUrl, theme, lyrics, onBack }: Player
         <Settings className="w-4 h-4 md:w-5 md:h-5" />
       </button>
 
+      {/* Settings Panel */}
       <AnimatePresence>
         {showSettings && (
           <motion.div
@@ -116,13 +252,85 @@ export function PlayerView({ metadata, audioUrl, theme, lyrics, onBack }: Player
             </div>
 
             <div className="space-y-6">
+
+              {/* ── Translate Section ── */}
+              <div className="space-y-3">
+                <label className="text-xs text-white/50 uppercase tracking-widest font-semibold font-mono flex items-center gap-2">
+                  <Languages className="w-3.5 h-3.5" /> Translate Lyrics
+                </label>
+
+                {/* Language selector */}
+                <div className="relative">
+                  <button
+                    onClick={() => setShowLangPicker(p => !p)}
+                    className="w-full flex items-center justify-between px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-sm text-white/80 hover:bg-white/10 transition"
+                  >
+                    <span>{TRANSLATE_OPTIONS.find(o => o.value === translateTarget)?.label ?? 'Select language'}</span>
+                    <ChevronDown className={cn('w-4 h-4 text-white/40 transition-transform', showLangPicker && 'rotate-180')} />
+                  </button>
+                  <AnimatePresence>
+                    {showLangPicker && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -6 }}
+                        className="absolute top-full mt-2 left-0 right-0 bg-[#1a1a1a] border border-white/10 rounded-xl overflow-hidden shadow-2xl z-10 max-h-52 overflow-y-auto"
+                      >
+                        {TRANSLATE_OPTIONS.map(opt => (
+                          <button
+                            key={opt.value}
+                            onClick={() => { setTranslateTarget(opt.value); setShowLangPicker(false); }}
+                            className={cn(
+                              'w-full flex items-center justify-between px-3 py-2.5 text-sm hover:bg-white/5 transition text-left gap-2',
+                              translateTarget === opt.value ? 'text-[#FF3366]' : 'text-white/70'
+                            )}
+                          >
+                            <span className="font-medium">{opt.label}</span>
+                            <span className="text-[10px] text-white/30 shrink-0">{opt.description}</span>
+                            {translateTarget === opt.value && <Check className="w-3.5 h-3.5 text-[#FF3366] shrink-0" />}
+                          </button>
+                        ))}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+
+                {/* Action buttons */}
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => doTranslate()}
+                    disabled={isTranslating}
+                    className="flex-1 py-2 bg-[#FF3366]/90 hover:bg-[#FF3366] disabled:opacity-50 rounded-xl text-xs font-bold text-white tracking-wide transition-colors flex items-center justify-center gap-1.5"
+                  >
+                    {isTranslating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Languages className="w-3.5 h-3.5" />}
+                    Translate
+                  </button>
+                  {isTranslated && (
+                    <button
+                      onClick={revertToOriginal}
+                      className="flex-1 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-xs font-bold text-white/60 tracking-wide transition-colors"
+                    >
+                      Original
+                    </button>
+                  )}
+                </div>
+
+                {isTranslated && (
+                  <p className="text-[10px] text-[#FF3366]/80 font-mono">
+                    ✓ Showing translated lyrics
+                  </p>
+                )}
+              </div>
+
+              <div className="border-t border-white/10 pt-1" />
+
               {/* Typeface */}
               <div className="space-y-3">
                 <label className="text-xs text-white/50 uppercase tracking-widest font-semibold font-mono">Typeface</label>
                 <div className="grid grid-cols-3 gap-2">
                   {['sans', 'elegant', 'brutalist_mono'].map(f => (
                     <button key={f} onClick={() => setCustomTheme({ ...customTheme, fontStyle: f })}
-                      className={cn("py-2 px-1 text-[10px] uppercase font-bold rounded-xl border transition-all truncate", customTheme.fontStyle === f ? "bg-white text-black border-white" : "border-white/10 text-white/50 hover:bg-white/5 hover:text-white")}>
+                      className={cn('py-2 px-1 text-[10px] uppercase font-bold rounded-xl border transition-all truncate', customTheme.fontStyle === f ? 'bg-white text-black border-white' : 'border-white/10 text-white/50 hover:bg-white/5 hover:text-white')}>
                       {f.split('_')[0]}
                     </button>
                   ))}
@@ -135,7 +343,7 @@ export function PlayerView({ metadata, audioUrl, theme, lyrics, onBack }: Player
                 <div className="grid grid-cols-3 gap-2">
                   {['soft_fade', 'floating', 'snappy'].map(a => (
                     <button key={a} onClick={() => setCustomTheme({ ...customTheme, animation: a })}
-                      className={cn("py-2 px-1 text-[10px] uppercase font-bold rounded-xl border transition-all truncate", customTheme.animation === a ? "bg-[#FF3366] text-white border-[#FF3366]" : "border-white/10 text-white/50 hover:bg-white/5 hover:text-white")}>
+                      className={cn('py-2 px-1 text-[10px] uppercase font-bold rounded-xl border transition-all truncate', customTheme.animation === a ? 'bg-[#FF3366] text-white border-[#FF3366]' : 'border-white/10 text-white/50 hover:bg-white/5 hover:text-white')}>
                       {a.split('_')[0]}
                     </button>
                   ))}
@@ -148,7 +356,7 @@ export function PlayerView({ metadata, audioUrl, theme, lyrics, onBack }: Player
                 <div className="grid grid-cols-4 gap-2">
                   {['glow', 'color', 'outline', 'bold'].map(h => (
                     <button key={h} onClick={() => setCustomTheme({ ...customTheme, highlightEffect: h })}
-                      className={cn("py-2 px-1 text-[10px] uppercase font-bold rounded-xl border transition-all truncate", customTheme.highlightEffect === h ? "bg-white/20 text-white border-white/40" : "border-white/10 text-white/50 hover:bg-white/5 hover:text-white")}>
+                      className={cn('py-2 px-1 text-[10px] uppercase font-bold rounded-xl border transition-all truncate', customTheme.highlightEffect === h ? 'bg-white/20 text-white border-white/40' : 'border-white/10 text-white/50 hover:bg-white/5 hover:text-white')}>
                       {h}
                     </button>
                   ))}
@@ -162,7 +370,7 @@ export function PlayerView({ metadata, audioUrl, theme, lyrics, onBack }: Player
                   <div className="flex gap-2">
                     {['small', 'medium', 'large'].map(s => (
                       <button key={s} onClick={() => updateSetting('lyricSize', s as any)}
-                        className={cn("flex-1 py-1.5 text-[10px] uppercase font-bold rounded-md border transition-all", settings.lyricSize === s ? "bg-white/20 text-white border-white/40" : "border-transparent text-white/50 hover:bg-white/5")}>
+                        className={cn('flex-1 py-1.5 text-[10px] uppercase font-bold rounded-md border transition-all', settings.lyricSize === s ? 'bg-white/20 text-white border-white/40' : 'border-transparent text-white/50 hover:bg-white/5')}>
                         {s.charAt(0)}
                       </button>
                     ))}
@@ -173,7 +381,7 @@ export function PlayerView({ metadata, audioUrl, theme, lyrics, onBack }: Player
                   <div className="flex gap-2">
                     {['left', 'center', 'right'].map(s => (
                       <button key={s} onClick={() => updateSetting('lyricAlignment', s as any)}
-                        className={cn("flex-1 py-1.5 text-[10px] uppercase font-bold rounded-md border transition-all", settings.lyricAlignment === s ? "bg-white/20 text-white border-white/40" : "border-transparent text-white/50 hover:bg-white/5")}>
+                        className={cn('flex-1 py-1.5 text-[10px] uppercase font-bold rounded-md border transition-all', settings.lyricAlignment === s ? 'bg-white/20 text-white border-white/40' : 'border-transparent text-white/50 hover:bg-white/5')}>
                         {s.charAt(0)}
                       </button>
                     ))}
@@ -234,17 +442,17 @@ export function PlayerView({ metadata, audioUrl, theme, lyrics, onBack }: Player
         )}
       </AnimatePresence>
 
-      {/* Controls */}
+      {/* Controls bar */}
       <div className="absolute inset-x-4 bottom-4 md:inset-x-8 md:bottom-8 bg-black/60 backdrop-blur-3xl border border-white/10 rounded-3xl p-4 md:px-8 flex flex-col md:flex-row items-center justify-between gap-4 z-40 shadow-2xl">
         <div className="flex w-full md:w-auto items-center justify-between md:justify-start md:gap-6">
           <button
             onClick={toggleKaraoke}
-            className={cn("flex items-center justify-center gap-2 px-3 py-2 md:px-5 md:py-2.5 rounded-full text-[10px] md:text-xs font-bold uppercase tracking-widest transition-all",
-              karaokeMode ? "bg-[#FF3366] text-white shadow-[0_0_20px_rgba(255,51,102,0.4)]" : "bg-white/5 text-white/60 border border-white/10 hover:bg-white/10"
+            className={cn('flex items-center justify-center gap-2 px-3 py-2 md:px-5 md:py-2.5 rounded-full text-[10px] md:text-xs font-bold uppercase tracking-widest transition-all',
+              karaokeMode ? 'bg-[#FF3366] text-white shadow-[0_0_20px_rgba(255,51,102,0.4)]' : 'bg-white/5 text-white/60 border border-white/10 hover:bg-white/10'
             )}>
             {karaokeMode ? <MicOff className="w-3.5 h-3.5 md:w-4 md:h-4" /> : <Mic2 className="w-3.5 h-3.5 md:w-4 md:h-4" />}
-            <span className="hidden md:inline">{karaokeMode ? "Karaoke ON" : "Karaoke OFF"}</span>
-            <span className="md:hidden">{karaokeMode ? "ON" : "OFF"}</span>
+            <span className="hidden md:inline">{karaokeMode ? 'Karaoke ON' : 'Karaoke OFF'}</span>
+            <span className="md:hidden">{karaokeMode ? 'ON' : 'OFF'}</span>
           </button>
 
           <div className="flex items-center gap-4 md:gap-8 md:absolute md:left-1/2 md:-translate-x-1/2">
