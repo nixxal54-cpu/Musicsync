@@ -74,7 +74,7 @@ Do not stop halfway—generate the full length of the track.
 Return a JSON with "theme" and "lyrics".` : `Return a JSON with strictly just "theme" as we already have synced lyrics.`}`;
 
   const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
+    model: "gemini-2.0-flash",
     contents: prompt,
     config: {
       responseMimeType: "application/json",
