@@ -47,11 +47,20 @@ export function PlayerView({ metadata, audioUrl, theme, lyrics, onBack }: Player
     setDetectedLang(lang);
     if (lang) {
       // Auto-set sensible default target
-      if (lang === 'Hindi') setTranslateTarget('hinglish');
-      else if (lang === 'Tamil') setTranslateTarget('tamil_roman');
-      else if (lang === 'Arabic') setTranslateTarget('arabic_roman');
-      else if (lang === 'Japanese') setTranslateTarget('japanese_roman');
-      else if (lang === 'Korean') setTranslateTarget('korean_roman');
+      if (lang === 'Hindi')      setTranslateTarget('hinglish');
+      else if (lang === 'Tamil')     setTranslateTarget('tamil_roman');
+      else if (lang === 'Bengali')   setTranslateTarget('bengali_roman');
+      else if (lang === 'Telugu')    setTranslateTarget('telugu_roman');
+      else if (lang === 'Kannada')   setTranslateTarget('kannada_roman');
+      else if (lang === 'Malayalam') setTranslateTarget('malayalam_roman');
+      else if (lang === 'Gujarati')  setTranslateTarget('gujarati_roman');
+      else if (lang === 'Punjabi')   setTranslateTarget('punjabi_roman');
+      else if (lang === 'Odia')      setTranslateTarget('odia_roman');
+      else if (lang === 'Santali')   setTranslateTarget('english');
+      else if (lang === 'Manipuri')  setTranslateTarget('english');
+      else if (lang === 'Arabic')    setTranslateTarget('arabic_roman');
+      else if (lang === 'Japanese')  setTranslateTarget('japanese_roman');
+      else if (lang === 'Korean')    setTranslateTarget('korean_roman');
       else setTranslateTarget('english');
 
       // Show toast after short delay
@@ -168,21 +177,32 @@ export function PlayerView({ metadata, audioUrl, theme, lyrics, onBack }: Player
                       initial={{ opacity: 0, y: -6 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -6 }}
-                      className="absolute bottom-full mb-2 left-0 right-0 bg-[#1a1a1a] border border-white/10 rounded-xl overflow-hidden shadow-2xl z-10"
+                      className="absolute bottom-full mb-2 left-0 right-0 bg-[#1a1a1a] border border-white/10 rounded-xl overflow-hidden shadow-2xl z-10 max-h-64 overflow-y-auto"
                     >
-                      {TRANSLATE_OPTIONS.map(opt => (
-                        <button
-                          key={opt.value}
-                          onClick={() => { setTranslateTarget(opt.value); setShowLangPicker(false); }}
-                          className={cn(
-                            'w-full flex items-center justify-between px-3 py-2.5 text-sm hover:bg-white/5 transition text-left',
-                            translateTarget === opt.value ? 'text-[#FF3366]' : 'text-white/70'
-                          )}
-                        >
-                          <span>{opt.label}</span>
-                          <span className="text-[10px] text-white/30">{opt.description}</span>
-                        </button>
-                      ))}
+                      {(['Global', 'Indian', 'Indian Romanized'] as const).map(group => {
+                        const groupOpts = TRANSLATE_OPTIONS.filter(o => o.group === group);
+                        if (!groupOpts.length) return null;
+                        return (
+                          <div key={group}>
+                            <div className="px-3 py-1.5 bg-white/5 text-[9px] uppercase tracking-widest font-bold text-white/30 sticky top-0">
+                              {group}
+                            </div>
+                            {groupOpts.map(opt => (
+                              <button
+                                key={opt.value}
+                                onClick={() => { setTranslateTarget(opt.value); setShowLangPicker(false); }}
+                                className={cn(
+                                  'w-full flex items-center justify-between px-3 py-2.5 text-sm hover:bg-white/5 transition text-left',
+                                  translateTarget === opt.value ? 'text-[#FF3366]' : 'text-white/70'
+                                )}
+                              >
+                                <span>{opt.label}</span>
+                                {translateTarget === opt.value && <Check className="w-3.5 h-3.5 text-[#FF3366] shrink-0" />}
+                              </button>
+                            ))}
+                          </div>
+                        );
+                      })}
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -276,20 +296,30 @@ export function PlayerView({ metadata, audioUrl, theme, lyrics, onBack }: Player
                         exit={{ opacity: 0, y: -6 }}
                         className="absolute top-full mt-2 left-0 right-0 bg-[#1a1a1a] border border-white/10 rounded-xl overflow-hidden shadow-2xl z-10 max-h-52 overflow-y-auto"
                       >
-                        {TRANSLATE_OPTIONS.map(opt => (
-                          <button
-                            key={opt.value}
-                            onClick={() => { setTranslateTarget(opt.value); setShowLangPicker(false); }}
-                            className={cn(
-                              'w-full flex items-center justify-between px-3 py-2.5 text-sm hover:bg-white/5 transition text-left gap-2',
-                              translateTarget === opt.value ? 'text-[#FF3366]' : 'text-white/70'
-                            )}
-                          >
-                            <span className="font-medium">{opt.label}</span>
-                            <span className="text-[10px] text-white/30 shrink-0">{opt.description}</span>
-                            {translateTarget === opt.value && <Check className="w-3.5 h-3.5 text-[#FF3366] shrink-0" />}
-                          </button>
-                        ))}
+                        {(['Global', 'Indian', 'Indian Romanized'] as const).map(group => {
+                          const groupOpts = TRANSLATE_OPTIONS.filter(o => o.group === group);
+                          if (!groupOpts.length) return null;
+                          return (
+                            <div key={group}>
+                              <div className="px-3 py-1.5 bg-white/5 text-[9px] uppercase tracking-widest font-bold text-white/30 sticky top-0">
+                                {group}
+                              </div>
+                              {groupOpts.map(opt => (
+                                <button
+                                  key={opt.value}
+                                  onClick={() => { setTranslateTarget(opt.value); setShowLangPicker(false); }}
+                                  className={cn(
+                                    'w-full flex items-center justify-between px-3 py-2.5 text-sm hover:bg-white/5 transition text-left gap-2',
+                                    translateTarget === opt.value ? 'text-[#FF3366]' : 'text-white/70'
+                                  )}
+                                >
+                                  <span className="font-medium">{opt.label}</span>
+                                  {translateTarget === opt.value && <Check className="w-3.5 h-3.5 text-[#FF3366] shrink-0" />}
+                                </button>
+                              ))}
+                            </div>
+                          );
+                        })}
                       </motion.div>
                     )}
                   </AnimatePresence>
