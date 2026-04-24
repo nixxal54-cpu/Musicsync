@@ -11,16 +11,110 @@ interface LyricsDisplayProps {
   settings: UserSettings;
 }
 
+// ── Visualizer: 20 bars animated via RAF, reads AnalyserNode if available ──
+function Visualizer({ audioRef, color }: { audioRef: React.RefObject<HTMLAudioElement>; color: string }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const rafRef = useRef<number | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const dataRef = useRef<Uint8Array | null>(null);
+  const ctxRef = useRef<AudioContext | null>(null);
+
+  useEffect(() => {
+    const BAR_COUNT = 28;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d')!;
+
+    // Try to hook up Web Audio analyser for real frequency data
+    const audio = audioRef.current;
+    if (audio && !analyserRef.current) {
+      try {
+        const ac = new AudioContext();
+        ctxRef.current = ac;
+        const source = ac.createMediaElementSource(audio);
+        const analyser = ac.createAnalyser();
+        analyser.fftSize = 64;
+        source.connect(analyser);
+        analyser.connect(ac.destination);
+        analyserRef.current = analyser;
+        dataRef.current = new Uint8Array(analyser.frequencyBinCount);
+      } catch (_) {
+        // fallback to fake animation if already connected
+      }
+    }
+
+    // Fake heights for fallback animation
+    const fakePhases = Array.from({ length: BAR_COUNT }, (_, i) => Math.random() * Math.PI * 2);
+    const fakeSpeeds = Array.from({ length: BAR_COUNT }, () => 0.03 + Math.random() * 0.04);
+
+    let frame = 0;
+
+    const draw = () => {
+      frame++;
+      const W = canvas.width;
+      const H = canvas.height;
+      ctx.clearRect(0, 0, W, H);
+
+      const barW = W / BAR_COUNT;
+      const gap = 3;
+
+      for (let i = 0; i < BAR_COUNT; i++) {
+        let heightRatio: number;
+
+        if (analyserRef.current && dataRef.current) {
+          analyserRef.current.getByteFrequencyData(dataRef.current);
+          const idx = Math.floor((i / BAR_COUNT) * dataRef.current.length);
+          heightRatio = dataRef.current[idx] / 255;
+        } else {
+          // Smooth fake wave
+          fakePhases[i] += fakeSpeeds[i];
+          heightRatio = 0.15 + 0.7 * Math.abs(Math.sin(fakePhases[i]));
+        }
+
+        const barH = Math.max(4, heightRatio * H * 0.85);
+        const x = i * barW + gap / 2;
+        const y = (H - barH) / 2;
+
+        // Gradient per bar
+        const grad = ctx.createLinearGradient(x, y, x, y + barH);
+        grad.addColorStop(0, color + 'ff');
+        grad.addColorStop(1, color + '33');
+
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.roundRect(x, y, barW - gap, barH, 3);
+        ctx.fill();
+      }
+
+      rafRef.current = requestAnimationFrame(draw);
+    };
+
+    rafRef.current = requestAnimationFrame(draw);
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+  }, [color]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      width={320}
+      height={80}
+      className="w-64 md:w-80 h-16 md:h-20"
+      style={{ imageRendering: 'pixelated' }}
+    />
+  );
+}
+
 export function LyricsDisplay({ lyrics, audioRef, lyricOffset, theme, settings }: LyricsDisplayProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
   const lineRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const vizRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number | null>(null);
   const currentYRef = useRef<number>(0);
   const targetYRef = useRef<number>(0);
   const lastActiveRef = useRef<number>(-2);
+  const vizVisibleRef = useRef<boolean>(true);
 
-  // Keep mutable refs so RAF always reads latest without restarting
   const settingsRef = useRef(settings);
   const themeRef = useRef(theme);
   const lyricOffsetRef = useRef(lyricOffset);
@@ -32,9 +126,8 @@ export function LyricsDisplay({ lyrics, audioRef, lyricOffset, theme, settings }
     const tick = () => {
       const audio = audioRef.current;
       const ct = audio ? audio.currentTime : 0;
-      const s = settingsRef.current;
-      const t = themeRef.current;
       const offset = lyricOffsetRef.current;
+      const t = themeRef.current;
 
       // Active index
       let activeIndex = -1;
@@ -42,6 +135,17 @@ export function LyricsDisplay({ lyrics, audioRef, lyricOffset, theme, settings }
         if (ct - offset >= lyrics[i].time) {
           activeIndex = i;
           break;
+        }
+      }
+
+      // Show/hide visualizer — visible when no active lyric
+      const showViz = activeIndex === -1;
+      const viz = vizRef.current;
+      if (viz) {
+        if (showViz !== vizVisibleRef.current) {
+          vizVisibleRef.current = showViz;
+          viz.style.opacity = showViz ? '1' : '0';
+          viz.style.transform = showViz ? 'translateY(0px) scale(1)' : 'translateY(10px) scale(0.95)';
         }
       }
 
@@ -84,7 +188,7 @@ export function LyricsDisplay({ lyrics, audioRef, lyricOffset, theme, settings }
         el.style.textShadow = textShadow;
       });
 
-      // Recalculate scroll target only when active line changes
+      // Scroll
       if (lastActiveRef.current !== activeIndex) {
         lastActiveRef.current = activeIndex;
         const container = containerRef.current;
@@ -99,7 +203,6 @@ export function LyricsDisplay({ lyrics, audioRef, lyricOffset, theme, settings }
         }
       }
 
-      // Lerp scroll every frame — buttery smooth
       const inner = innerRef.current;
       if (inner) {
         const diff = targetYRef.current - currentYRef.current;
@@ -114,7 +217,7 @@ export function LyricsDisplay({ lyrics, audioRef, lyricOffset, theme, settings }
 
     rafRef.current = requestAnimationFrame(tick);
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
-  }, [lyrics, audioRef]); // only re-runs if song changes
+  }, [lyrics, audioRef]);
 
   const fontClass =
     theme.fontStyle === 'elegant' ? 'font-serif'
@@ -148,10 +251,23 @@ export function LyricsDisplay({ lyrics, audioRef, lyricOffset, theme, settings }
         WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%)',
       }}
     >
+      {/* Visualizer — shown when no lyric is active */}
+      <div
+        ref={vizRef}
+        className="absolute inset-0 flex items-center justify-center pointer-events-none"
+        style={{
+          opacity: 1,
+          transform: 'translateY(0px) scale(1)',
+          transition: 'opacity 0.5s ease, transform 0.5s ease',
+        }}
+      >
+        <Visualizer audioRef={audioRef} color={theme.primaryColor} />
+      </div>
+
+      {/* Lyrics inner — RAF owns transform */}
       <div
         ref={innerRef}
         className={cn('w-full max-w-5xl mx-auto flex flex-col will-change-transform', getAlignClass())}
-        // NO style.transform here — RAF owns it exclusively
       >
         {lyrics.map((line, i) => (
           <div
